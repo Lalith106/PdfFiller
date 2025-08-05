@@ -6,6 +6,10 @@ from azure.storage.blob import BlobServiceClient
 import fitz
 import pandas
 from datetime import datetime
+from flask import send_file
+import zipfile
+import tempfile
+
 
 
 
@@ -14,7 +18,6 @@ output_paths =[]
 
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
-
 AZURE_CONNECTION_STRING = os.environ["AZURE_CONNECTION_STRING"]
 
 CONTAINER_NAME ="pdfstorage"
@@ -37,6 +40,7 @@ HTML_TEMPLATE ='''<!DOCTYPE html>
         <input type="file" name="excel" required><br><br>
 
         <input type="submit" value="Process Files" style="background-color: black; color: white; padding: 10px;">
+
     </form>
 </body>
 </html>
@@ -54,6 +58,31 @@ def download_blob_to_local(blob_name, local_path):
     with open(local_path, "wb") as f:
         data = container_client.download_blob(blob_name)
         f.write(data.readall())
+
+
+def fetch_latest_blob_to_temp(prefix="filled_form_", download_dir="Downloads/pdfs", limit=4):
+    """
+    Downloads the latest `limit` processed PDF blobs locally for serving.
+    Returns the list of local paths to the downloaded files.
+    """
+    download_dir = os.path.abspath(download_dir)
+    os.makedirs(download_dir, exist_ok=True)
+
+    blobs = container_client.list_blobs(name_starts_with=prefix)
+    blobs = sorted(blobs, key=lambda x: x.last_modified, reverse=True)
+
+    downloaded_files = []
+    print(blobs[:limit])
+    for blob in blobs[:limit]:
+        blob_name = blob.name
+        print(blob_name)
+        local_path = os.path.join(download_dir, os.path.basename(blob_name))
+        with open(local_path, "wb") as f:
+            data = container_client.download_blob(blob_name)
+            f.write(data.readall())
+        downloaded_files.append(local_path)
+    print(downloaded_files)
+    return downloaded_files
 
 
 def download_processed_pdfs_from_blob(container_client, prefix="filled_form_", download_dir=os.path.join("Downloads", "pdfs"), limit=4):
@@ -118,7 +147,7 @@ def process_files(pdf_files, excel_file):
     shutil.rmtree("temp", ignore_errors=True)
     shutil.rmtree("temp_outputs",ignore_errors=True)
     print("delete temp")
-    download_processed_pdfs_from_blob(container_client)
+    #download_processed_pdfs_from_blob(container_client)
 
     return {"message": f"{len(output_paths)} PDFs generated, uploaded and Downloaded successfully."}
 
@@ -205,12 +234,20 @@ def index():
 def handle_upload():
     pdf_files = request.files.getlist("pdfs")
     excel_file = request.files.get("excel")
-
     result = process_files(pdf_files, excel_file)
-    if "error" in result:
-        return f"<h3>Error: {result['error']}</h3><a href='/'>Back</a>"
-    else:
-        return f"<h3>{result['message']}</h3><a href='/'>Back</a>"
+    downloaded_files = fetch_latest_blob_to_temp(limit=4)
+    if not downloaded_files:
+        return "No files found", 404
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".zip") as tmp_zip:
+        with zipfile.ZipFile(tmp_zip.name, 'w') as zipf:
+            for file_path in downloaded_files:
+                arcname = os.path.basename(file_path)
+                zipf.write(file_path, arcname=arcname)
+
+        zip_path = tmp_zip.name
+
+    return send_file(zip_path, as_attachment=True, download_name="processed_pdfs.zip")
 
 
 if __name__=="__main__":
