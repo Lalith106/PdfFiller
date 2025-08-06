@@ -18,6 +18,7 @@ output_paths =[]
 
 app.config['UPLOAD_FOLDER'] = 'uploads'
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
 AZURE_CONNECTION_STRING = os.environ["AZURE_CONNECTION_STRING"]
 
 CONTAINER_NAME ="pdfstorage"
@@ -145,7 +146,7 @@ def process_files(pdf_files, excel_file):
         upload_file_to_blob(path)
 
     shutil.rmtree("temp", ignore_errors=True)
-    shutil.rmtree("temp_outputs",ignore_errors=True)
+    #shutil.rmtree("temp_outputs",ignore_errors=True)
     print("delete temp")
     #download_processed_pdfs_from_blob(container_client)
 
